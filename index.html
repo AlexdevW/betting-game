@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Betting Game</title>
+    <style>
+        /* 页面基本样式设置 */
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(to bottom right, #f0f4f8, #e1e8f0);
+            display: flex;
+            justify-content: center;
+            margin: 0;
+            flex-direction: column;
+            align-items: center;
+            color: #333;
+        }
+
+        /* 游戏容器样式 */
+        #gameContainer {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid #007bff;
+            border-radius: 15px;
+            box-shadow: 0 6px 30px rgba(0, 0, 0, 0.2);
+            padding: 20px;
+            width: 94vh;
+            max-width: 90vw;
+        }
+
+        /* 画布样式 */
+        canvas {
+            width: 100%;
+            height: auto;
+            border: 2px solid #007bff;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #e9ecef, #d0d9df);
+        }
+
+        /* 按钮容器样式 */
+        .button-container {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        /* 筹码按钮样式 */
+        .chip-button {
+            margin: 0 10px;
+            padding: 12px 25px;
+            cursor: pointer;
+            border: none;
+            border-radius: 8px;
+            font-size: 18px;
+            background: linear-gradient(145deg, #e6e9f0, #ffffff);
+            box-shadow: 5px 5px 10px rgba(0, 0, 0, 0.2), -5px -5px 10px #ffffff;
+            transition: background 0.3s, transform 0.2s, box-shadow 0.3s;
+        }
+
+        /* 按钮悬停效果 */
+        .chip-button:hover {
+            background: linear-gradient(145deg, #007bff, #0056b3);
+            color: white;
+            box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.3), -2px -2px 5px #ffffff;
+        }
+
+        /* 选中按钮样式 */
+        .chip-button.selected {
+            background: linear-gradient(145deg, #0056b3, #007bff);
+            color: white;
+            box-shadow: inset 2px 2px 5px rgba(0, 0, 0, 0.3), inset -2px -2px 5px #ffffff;
+        }
+
+        /* 显示得分、倒计时和结果的样式 */
+        #scoreDisplay,
+        #countdownDisplay,
+        #resultDisplay {
+            font-size: 24px;
+            margin: 10px 0;
+        }
+
+        /* 倒计时样式 */
+        #countdownDisplay {
+            font-weight: bold;
+        }
+
+        /* 结果显示样式 */
+        #resultDisplay {
+            background: rgba(40, 167, 69, 0.1);
+            border-radius: 8px;
+            color: #28a745;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 600px) {
+            .chip-button {
+                font-size: 16px;
+                padding: 10px 20px;
+            }
+
+            #scoreDisplay,
+            #countdownDisplay,
+            #resultDisplay {
+                font-size: 20px;
+            }
+
+            canvas {
+                margin-bottom: 15px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="countdownDisplay">距离开奖还有: <span id="countdown">10</span> 秒</div>
+    <div id="scoreDisplay">Total Score: 0</div>
+    <div id="resultDisplay"></div>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <div class="button-container">
+            <button class="chip-button" data-value="100" data-color="red">筹码 100</button>
+            <button class="chip-button" data-value="200" data-color="green">筹码 200</button>
+            <button class="chip-button" data-value="300" data-color="blue">筹码 300</button>
+        </div>
+    </div>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // 游戏常量
+        const TARGET_RADIUS_FACTOR = 0.1; // 目标半径因子
+        const CHIP_RADIUS_FACTOR = 0.03; // 筹码半径因子
+        const ANIMATION_DURATION = 530; // 动画持续时间
+        const COUNTDOWN_TIME = 20; // 倒计时初始时间
+        const TARGET_CHIP_LIMIT = 40; // 每个目标的最大筹码数量
+
+        // 游戏状态
+        const gameState = {
+            targets: [
+                { x: 0.25, y: 0.25, score: 0, userBet: 0, multiplier: 2, count: 0 },
+                { x: 0.75, y: 0.25, score: 0, userBet: 0, multiplier: 3, count: 0 },
+                { x: 0.25, y: 0.75, score: 0, userBet: 0, multiplier: 4, count: 0 },
+                { x: 0.75, y: 0.75, score: 0, userBet: 0, multiplier: 5, count: 0 }
+            ],
+            chips: [], // 当前筹码列表
+            totalScore: 0, // 总得分
+            selectedChip: null, // 当前选中的筹码
+            totalChips: 800, // 总筹码数
+            countdownTime: COUNTDOWN_TIME, // 当前倒计时
+            anyChipAnimating: false, // 标记是否有筹码正在动画中
+            distributeChipsTimer: null, // 分配筹码的定时器
+        };
+
+        // 调整画布大小
+        function resizeCanvas() {
+            const pixelRatio = window.devicePixelRatio || 1; // 获取设备像素比
+            canvas.width = document.querySelector('#gameCanvas').clientWidth * pixelRatio; // 设置画布宽度
+            canvas.height = canvas.width * 0.6;  // 设置画布高度
+            drawTargets();  // 绘制目标
+            gameState.chips.forEach(updateChipTarget); // 更新已存在筹码的目标位置
+            if (gameState.selectedChip) {
+                const button = document.querySelector(`.chip-button[data-value="${gameState.selectedChip.value}"]`);
+                if (button) {
+                    const { startX, startY } = calculateChipStartPosition(button);
+                    gameState.selectedChip.startX = startX; // 更新选中筹码的起始X坐标
+                    gameState.selectedChip.startY = startY; // 更新选中筹码的起始Y坐标
+                }
+            }
+        }
+
+        // 更新筹码目标位置
+        function updateChipTarget(chip) {
+            const target = gameState.targets[chip.targetIndex]; // 获取筹码目标
+            chip.targetX = target.x * canvas.width + chip.offsetX; // 计算目标X坐标
+            chip.targetY = target.y * canvas.height + chip.offsetY; // 计算目标Y坐标
+            if (!gameState.anyChipAnimating) {
+                drawChip(chip.targetX, chip.targetY, chip.value, chip.color); // 绘制筹码
+            }
+        }
+
+        // 绘制筹码
+        function drawChip(x, y, value, color) {
+            const chipRadius = CHIP_RADIUS_FACTOR * canvas.width; // 计算筹码半径
+            ctx.fillStyle = color; // 设置筹码颜色
+            ctx.beginPath();
+            ctx.arc(x, y, chipRadius, 0, Math.PI * 2); // 绘制圆形筹码
+            ctx.fill();
+            ctx.fillStyle = 'white'; // 设置文本颜色
+            ctx.font = `bold ${chipRadius * 0.5}px Arial`; // 设置字体
+            ctx.textAlign = 'center'; // 文本对齐方式
+            ctx.textBaseline = 'middle'; // 文本基线对齐方式
+            ctx.fillText(value, x, y); // 在筹码上绘制值
+        }
+
+        // 绘制目标
+        function drawTargets() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // 清空画布
+            const chipRadius = CHIP_RADIUS_FACTOR * canvas.width; // 计算筹码半径
+            gameState.targets.forEach(target => {
+                const targetX = target.x * canvas.width; // 计算目标X坐标
+                const targetY = target.y * canvas.height; // 计算目标Y坐标
+                const targetRadius = TARGET_RADIUS_FACTOR * canvas.width; // 计算目标半径
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.1)'; // 设置目标颜色
+                ctx.beginPath();
+                ctx.arc(targetX, targetY, targetRadius, 0, Math.PI * 2); // 绘制目标圆
+                ctx.fill();
+                ctx.fillStyle = 'black'; // 设置文本颜色
+                ctx.font = `bold ${chipRadius * 0.6}px Arial`; // 设置字体
+                ctx.fillText(target.userBet, targetX, targetY + targetRadius + 20); // 显示用户下注
+                ctx.fillStyle = 'blue'; // 设置乘数文本颜色
+                ctx.font = `bold ${chipRadius * 0.5}px Arial`; // 设置乘数字体
+                ctx.fillText(`×${target.multiplier}`, targetX, targetY - targetRadius - 20); // 显示乘数
+                ctx.fillStyle = 'orange'; // 设置下注金额文本颜色
+                ctx.fillText(`下注: ${target.score}`, targetX, targetY + targetRadius + 50); // 显示下注金额
+            });
+        }
+
+        // 动画筹码
+        function animateChips() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // 清空画布
+            drawTargets(); // 重新绘制目标
+            gameState.anyChipAnimating = false; // 重置动画状态
+            gameState.chips.forEach((chip, index) => {
+                const progress = Math.min((performance.now() - chip.startTime) / ANIMATION_DURATION, 1); // 计算动画进度
+                chip.x = chip.startX + (chip.targetX - chip.startX) * progress; // 更新筹码X坐标
+                chip.y = chip.startY + (chip.targetY - chip.startY) * progress; // 更新筹码Y坐标
+
+                drawChip(chip.x, chip.y, chip.value, chip.color);
+
+                if (progress < 1) gameState.anyChipAnimating = true; // 标记仍有筹码在动画中
+            });
+            if (gameState.anyChipAnimating) {
+                requestAnimationFrame(animateChips); // 如果还有筹码在动画中，则继续请求动画帧
+            }
+        }
+
+        // 限制每个目标的筹码数量
+        function limitChips(target, targetIndex) {
+            target.count += 1; // 增加目标筹码数量
+            if (target.count > TARGET_CHIP_LIMIT) { // 如果超过限制
+                const i = gameState.chips.findIndex(chip => chip.targetIndex === targetIndex); // 查找第一个目标筹码
+                gameState.chips.splice(i, 1); // 移除筹码
+                target.count -= 1; // 减少目标筹码数量
+            }
+        }
+
+        // 创建随机筹码
+        function createRandomChip() {
+            const randomTargetIndex = Math.floor(Math.random() * gameState.targets.length); // 随机选择目标
+            const randomChipType = {
+                value: [100, 200, 300][Math.floor(Math.random() * 3)], // 随机筹码值
+                color: ['red', 'green', 'blue'][Math.floor(Math.random() * 3)] // 随机筹码颜色
+            };
+            const target = gameState.targets[randomTargetIndex]; // 获取目标
+            target.score += randomChipType.value; // 增加目标分数
+            const offsetX = (Math.random() - 0.5) * (TARGET_RADIUS_FACTOR * canvas.width * 0.5); // 随机偏移量
+            const offsetY = (Math.random() - 0.5) * (TARGET_RADIUS_FACTOR * canvas.width * 0.5);
+            const chip = {
+                value: randomChipType.value, // 设置筹码值
+                color: randomChipType.color, // 设置筹码颜色
+                startX: canvas.width / 2, // 设置筹码起始X坐标
+                startY: -20, // 设置筹码起始Y坐标
+                targetIndex: randomTargetIndex, // 设置目标索引
+                offsetX, // 设置偏移X
+                offsetY, // 设置偏移Y
+                duration: ANIMATION_DURATION, // 设置动画时长
+                startTime: performance.now(), // 获取当前时间
+            };
+            gameState.chips.push(chip); // 将筹码添加到列表
+            console.log(gameState.chips.length, '')
+            limitChips(target, randomTargetIndex); // 限制目标筹码数量
+
+            updateChipTarget(chip); // 更新筹码目标
+            animateChips(); // 启动筹码动画
+        }
+
+        // 分发筹码
+        function distributeChips() {
+            if (gameState.distributeChipsTimer) clearInterval(gameState.distributeChipsTimer);
+            let chipsDistributed = 0; // 已分发筹码数量
+            gameState.distributeChipsTimer = setInterval(() => {
+                if (chipsDistributed < gameState.totalChips) {
+                    createRandomChip(); // 创建随机筹码
+                    chipsDistributed++;
+                } else {
+                    clearInterval(gameState.distributeChipsTimer); // 分发完毕，清除定时器
+                    gameState.distributeChipsTimer = null;
+                }
+            }, 200); // 每200毫秒分发一个筹码
+        }
+
+        // 分发用户筹码
+        function distributeUserChip(targetIndex) {
+            if (!gameState.selectedChip) return; // 如果没有选择的筹码，则返回
+            const target = gameState.targets[targetIndex]; // 获取目标
+            target.score += gameState.selectedChip.value; // 增加目标分数
+            target.userBet += gameState.selectedChip.value; // 增加用户下注
+            const targetX = target.x * canvas.width; // 计算目标X坐标
+            const targetY = target.y * canvas.height; // 计算目标Y坐标
+            const chip = {
+                ...gameState.selectedChip, // 复制选中筹码属性
+                startX: gameState.selectedChip.startX, // 设置筹码起始X坐标
+                startY: gameState.selectedChip.startY, // 设置筹码起始Y坐标
+                targetIndex, // 设置目标索引
+                duration: ANIMATION_DURATION, // 设置动画时长
+                startTime: performance.now(), // 获取当前时间
+                targetX: targetX + (Math.random() - 0.5) * (TARGET_RADIUS_FACTOR * canvas.width * 0.5), // 设置目标X坐标，带随机偏移
+                targetY: targetY + (Math.random() - 0.5) * (TARGET_RADIUS_FACTOR * canvas.width * 0.5), // 设置目标Y坐标，带随机偏移
+            };
+            gameState.chips.push(chip); // 将筹码添加到列表
+
+            limitChips(target, targetIndex); // 限制目标筹码数量
+            animateChips(); // 启动筹码动画
+            gameState.totalScore += gameState.selectedChip.value; // 更新总得分
+            document.getElementById('scoreDisplay').innerText = `Total Score: ${gameState.totalScore}`; // 更新得分显示
+            drawTargets(); // 重新绘制目标
+        }
+
+        // 处理画布点击事件
+        canvas.addEventListener('click', (event) => {
+            const rect = canvas.getBoundingClientRect(); // 获取画布边界
+            const pixelRatio = window.devicePixelRatio || 1; // 获取设备像素比
+
+            const targetX = (event.clientX - rect.left) * pixelRatio; // 计算点击位置的X坐标
+            const targetY = (event.clientY - rect.top) * pixelRatio; // 计算点击位置的Y坐标
+
+            gameState.targets.forEach((target, index) => {
+                const targetCanvasX = target.x * canvas.width; // 计算目标的X坐标
+                const targetCanvasY = target.y * canvas.height; // 计算目标的Y坐标
+                const distance = Math.sqrt((targetCanvasX - targetX) ** 2 + (targetCanvasY - targetY) ** 2); // 计算点击位置与目标的距离
+                const targetRadius = TARGET_RADIUS_FACTOR * canvas.width; // 计算目标半径
+
+                if (distance < targetRadius) { // 如果点击在目标范围内
+                    distributeUserChip(index); // 分发用户筹码
+                }
+            });
+        });
+
+        // 计算筹码起始位置
+        function calculateChipStartPosition(button) {
+            const buttonRect = button.getBoundingClientRect(); // 获取按钮边界
+            const canvasRect = canvas.getBoundingClientRect(); // 获取画布边界
+
+            const pixelRatio = window.devicePixelRatio || 1; // 获取设备像素比
+
+            return {
+                startX: (buttonRect.left - canvasRect.left + buttonRect.width / 2) * pixelRatio, // 计算起始X坐标
+                startY: (buttonRect.top - canvasRect.top + buttonRect.height / 2) * pixelRatio, // 计算起始Y坐标
+            };
+        }
+
+        // 处理筹码按钮点击事件
+        document.querySelector('.button-container').addEventListener('click', (event) => {
+            const button = event.target.closest('.chip-button'); // 获取点击的按钮
+            if (!button) return;
+            document.querySelectorAll('.chip-button').forEach(btn => btn.classList.remove('selected')); // 移除其他按钮的选中状态
+            button.classList.add('selected'); // 设置当前按钮为选中状态
+
+            const { startX, startY } = calculateChipStartPosition(button);
+            gameState.selectedChip = {
+                value: parseInt(button.dataset.value),
+                color: button.dataset.color,
+                startX,
+                startY,
+            };
+        });
+
+        // 重置游戏
+        function resetGame() {
+            gameState.targets.forEach(target => {
+                target.score = 0;
+                target.userBet = 0;
+                target.count = 0;
+            });
+            gameState.totalScore = 0;
+            document.getElementById('scoreDisplay').innerText = `Total Score: ${gameState.totalScore}`;
+            gameState.chips = [];
+            drawTargets();
+            startCountdown();
+            distributeChips();
+        }
+
+        // 触发开奖
+        function triggerDraw() {
+            const availableTargets = gameState.targets.filter(target => target.userBet > 0);
+            if (availableTargets.length > 0) {
+                const selectedTarget = availableTargets[Math.floor(Math.random() * availableTargets.length)];
+                const winScore = selectedTarget.userBet * selectedTarget.multiplier;
+                const resultMessage = `中奖奖品是第 ${gameState.targets.indexOf(selectedTarget) + 1} 个奖品。` +
+                    (winScore > 0 ? `恭喜你！你赢得了 ${winScore} 分！` : `未参与该奖品下注。`);
+                document.getElementById('resultDisplay').innerText = resultMessage;
+                resetGame();
+            } else {
+                resetGame();
+                document.getElementById('resultDisplay').innerText = '未中奖';
+            }
+        }
+
+        // 启动倒计时
+        function startCountdown() {
+            gameState.countdownTime = COUNTDOWN_TIME; // 重置倒计时
+            document.getElementById('countdown').innerText = gameState.countdownTime;
+            const countdownInterval = setInterval(() => {
+                gameState.countdownTime--;
+                document.getElementById('countdown').innerText = gameState.countdownTime;
+                if (gameState.countdownTime <= 0) {
+                    clearInterval(countdownInterval);
+                    triggerDraw();
+                }
+            }, 1000);
+        }
+
+        // 初始化筹码按钮
+        function initChipButton() {
+            const button = document.querySelector(`.chip-button[data-value="${100}"]`);
+            if (button) {
+                button.classList.add('selected');
+                const { startX, startY } = calculateChipStartPosition(button);
+                gameState.selectedChip = {
+                    value: parseInt(button.dataset.value),
+                    color: button.dataset.color,
+                    startX,
+                    startY,
+                };
+            }
+        }
+
+        resizeCanvas(); // 调整画布大小
+        window.addEventListener('resize', resizeCanvas); // 处理窗口大小变化
+        distributeChips(); // 开始分发筹码
+        startCountdown(); // 启动倒计时
+        initChipButton(); // 初始化筹码按钮
+    </script>
+</body>
+
+</html>
